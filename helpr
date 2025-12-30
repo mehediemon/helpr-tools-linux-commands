@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+
+VERSION="1.0.0"
+
+SYSTEM_DIR="/usr/share/helpr/pages"
+USER_DIR="$HOME/.config/helpr/pages"
+
+print_help() {
+  cat <<EOF
+helpr $VERSION
+cheat-style command reference
+
+Usage:
+  helpr <command>
+  helpr -l | --list
+  helpr -s <term>
+  helpr -h | --help
+
+Options:
+  -l, --list     List all pages
+  -s, --search   Search pages
+  -h, --help     Show help
+EOF
+}
+
+list_pages() {
+  {
+    [[ -d "$SYSTEM_DIR" ]] && ls "$SYSTEM_DIR"
+    [[ -d "$USER_DIR" ]] && ls "$USER_DIR"
+  } 2>/dev/null | sort -u
+}
+
+show_page() {
+  local page="$1"
+
+  if [[ -f "$USER_DIR/$page" ]]; then
+    cat "$USER_DIR/$page"
+    return
+  fi
+
+  if [[ -f "$SYSTEM_DIR/$page" ]]; then
+    cat "$SYSTEM_DIR/$page"
+    return
+  fi
+
+  echo "No cheat page found for '$page'"
+  exit 1
+}
+
+search_pages() {
+  local term="$1"
+  grep -Rni "$term" "$SYSTEM_DIR" "$USER_DIR" 2>/dev/null \
+    | sed 's|.*/||' \
+    | cut -d: -f1 \
+    | sort -u
+}
+
+# ------------------ ARG PARSING ------------------
+
+case "$1" in
+  -h|--help|"")
+    print_help
+    ;;
+  -l|--list)
+    list_pages
+    ;;
+  -s|--search)
+    [[ -z "$2" ]] && echo "Search term required" && exit 1
+    search_pages "$2"
+    ;;
+  *)
+    show_page "$1"
+    ;;
+esac

@@ -1,0 +1,16 @@
+# ls — list directory contents
+
+List files:
+  ls
+
+Long listing:
+  ls -l
+
+All files:
+  ls -a
+
+Human readable:
+  ls -lh
+
+Sort by time:
+  ls -lt
