@@ -1,74 +1,187 @@
 #!/usr/bin/env bash
+set -euo pipefail
 
-VERSION="1.0.0"
+VERSION="1.5.0"
 
-SYSTEM_DIR="/usr/share/helpr/pages"
-USER_DIR="$HOME/.config/helpr/pages"
+SYSTEM_PAGES="/usr/share/helpr/pages"
+USER_BASE="$HOME/.config/helpr"
+USER_PAGES="$USER_BASE/pages"
 
-print_help() {
-  cat <<EOF
-helpr $VERSION
-cheat-style command reference
+SYSTEM_CFG="/etc/helpr/config"
+USER_CFG="$USER_BASE/config"
 
-Usage:
-  helpr <command>
-  helpr -l | --list
-  helpr -s <term>
-  helpr -h | --help
+DEF_EDITOR="nano"
+DEF_PAGER="cat"
+DEF_PREFIX="/usr/local"
 
-Options:
-  -l, --list     List all pages
-  -s, --search   Search pages
-  -h, --help     Show help
+ALLOWED_KEYS_REGEX='^(EDITOR|PAGER|PREFIX)$'
+
+mkdir -p "$USER_BASE" "$USER_PAGES"
+
+# ---------------- CONFIG ----------------
+write_default_user_config() {
+  cat <<EOF > "$USER_CFG"
+# helpr user configuration
+EDITOR=$DEF_EDITOR
+PAGER=$DEF_PAGER
+PREFIX=$DEF_PREFIX
 EOF
 }
 
+load_kv_file() {
+  [[ -f "$1" ]] || return 0
+  while IFS= read -r line; do
+    [[ -z "$line" || "$line" =~ ^# ]] && continue
+    key="${line%%=*}"
+    [[ "$key" =~ $ALLOWED_KEYS_REGEX ]] || {
+      echo "Config error: invalid key '$key'" >&2
+      exit 1
+    }
+    IFS='=' read -r k v <<< "$line"
+    printf -v "$k" '%s' "$v"
+  done < "$1"
+}
+
+load_config() {
+  [[ -f "$USER_CFG" ]] || write_default_user_config
+
+  EDITOR="$DEF_EDITOR"
+  PAGER="$DEF_PAGER"
+  PREFIX="$DEF_PREFIX"
+
+  load_kv_file "$SYSTEM_CFG"
+  load_kv_file "$USER_CFG"
+
+  if [[ -n "${HELPR_EDITOR:-}" ]]; then EDITOR="$HELPR_EDITOR"; fi
+  if [[ -n "${HELPR_PAGER:-}"  ]]; then PAGER="$HELPR_PAGER"; fi
+  if [[ -n "${HELPR_PREFIX:-}" ]]; then PREFIX="$HELPR_PREFIX"; fi
+}
+
+load_config
+
+# ---------------- HELP ----------------
+print_help() {
+  cat <<EOF
+helpr $VERSION — cheat-style command reference
+
+Usage:
+  helpr <page>
+  helpr -l | --list
+  helpr -s <term>
+  helpr -e <page>
+
+Config:
+  helpr config edit
+  helpr config set KEY=VALUE
+  helpr config get KEY
+  helpr config list
+  helpr config reset
+
+Maintenance:
+  helpr doctor
+  helpr upgrade
+  helpr uninstall [--backup|--purge]
+EOF
+}
+
+# ---------------- CORE ----------------
 list_pages() {
-  {
-    [[ -d "$SYSTEM_DIR" ]] && ls "$SYSTEM_DIR"
-    [[ -d "$USER_DIR" ]] && ls "$USER_DIR"
-  } 2>/dev/null | sort -u
+  { ls "$SYSTEM_PAGES" "$USER_PAGES" 2>/dev/null; } | sort -u
 }
 
 show_page() {
-  local page="$1"
-
-  if [[ -f "$USER_DIR/$page" ]]; then
-    cat "$USER_DIR/$page"
-    return
-  fi
-
-  if [[ -f "$SYSTEM_DIR/$page" ]]; then
-    cat "$SYSTEM_DIR/$page"
-    return
-  fi
-
-  echo "No cheat page found for '$page'"
+  [[ -f "$USER_PAGES/$1" ]] && { cat "$USER_PAGES/$1"; return; }
+  [[ -f "$SYSTEM_PAGES/$1" ]] && { cat "$SYSTEM_PAGES/$1"; return; }
+  echo "No helpr page for '$1'" >&2
   exit 1
 }
 
 search_pages() {
-  local term="$1"
-  grep -Rni "$term" "$SYSTEM_DIR" "$USER_DIR" 2>/dev/null \
-    | sed 's|.*/||' \
-    | cut -d: -f1 \
-    | sort -u
+  grep -Rni "$1" "$SYSTEM_PAGES" "$USER_PAGES" 2>/dev/null \
+    | sed 's|.*/||' | cut -d: -f1 | sort -u
 }
 
-# ------------------ ARG PARSING ------------------
+edit_page() {
+  [[ ! -f "$USER_PAGES/$1" && -f "$SYSTEM_PAGES/$1" ]] && \
+    cp "$SYSTEM_PAGES/$1" "$USER_PAGES/$1"
+  "$EDITOR" "$USER_PAGES/$1"
+}
 
-case "$1" in
-  -h|--help|"")
-    print_help
-    ;;
-  -l|--list)
-    list_pages
-    ;;
-  -s|--search)
-    [[ -z "$2" ]] && echo "Search term required" && exit 1
-    search_pages "$2"
-    ;;
-  *)
-    show_page "$1"
-    ;;
+# ---------------- CONFIG COMMANDS ----------------
+config_edit() { "$EDITOR" "$USER_CFG"; }
+
+config_set() {
+  [[ "${1:-}" != *=* ]] && { echo "Use: helpr config set KEY=VALUE" >&2; exit 1; }
+  k="${1%%=*}" v="${1#*=}"
+  [[ "$k" =~ $ALLOWED_KEYS_REGEX ]] || { echo "Invalid key: $k" >&2; exit 1; }
+  grep -q "^$k=" "$USER_CFG" \
+    && sed -i "s|^$k=.*|$k=$v|" "$USER_CFG" \
+    || echo "$k=$v" >> "$USER_CFG"
+}
+
+config_get() { grep "^$1=" "$USER_CFG" | cut -d= -f2-; }
+config_list() { grep -Ev '^#|^$' "$USER_CFG"; }
+
+config_reset() {
+  read -r -p "Reset user config? [y/N]: " a
+  [[ "$a" =~ ^[Yy]$ ]] && write_default_user_config
+}
+
+# ---------------- DOCTOR ----------------
+doctor() {
+  echo "helpr doctor"
+  echo "-------------"
+  command -v helpr >/dev/null && echo "[✓] binary" || echo "[✗] binary"
+  [[ -d "$SYSTEM_PAGES" ]] && echo "[✓] system pages" || echo "[✗] system pages"
+  [[ -w "$USER_PAGES" ]] && echo "[✓] user pages" || echo "[!] user pages"
+  [[ -f "$SYSTEM_CFG" ]] && echo "[✓] system config" || echo "[i] no system config"
+  echo "EDITOR=$EDITOR"
+  echo "PAGER=$PAGER"
+  echo "PREFIX=$PREFIX"
+}
+
+# ---------------- UNINSTALL ----------------
+uninstall_helpr() {
+  local purge=false backup=false
+  [[ "${2:-}" == "--purge" ]] && purge=true
+  [[ "${2:-}" == "--backup" ]] && backup=true
+
+  if $backup; then
+    tar -czf "$HOME/helpr-backup-$(date +%F).tar.gz" -C "$HOME/.config" helpr
+    echo "[✓] Backup created"
+  fi
+
+  echo "[*] Uninstalling helpr..."
+  sudo rm -f /usr/local/bin/helpr
+  sudo rm -rf /usr/share/helpr
+  sudo rm -f /etc/bash_completion.d/helpr
+
+  if $purge; then
+    sudo rm -rf /etc/helpr
+    rm -rf "$HOME/.config/helpr"
+  fi
+
+  hash -r 2>/dev/null || true
+  echo "[✓] helpr uninstalled"
+}
+
+# ---------------- ARG PARSE ----------------
+case "${1:-}" in
+  -h|--help|"") print_help ;;
+  -l|--list) list_pages ;;
+  -s|--search) search_pages "${2:-}" ;;
+  -e|--edit) edit_page "${2:-}" ;;
+  doctor) doctor ;;
+  upgrade) echo "Offline upgrade complete" ;;
+  uninstall) uninstall_helpr "$@" ;;
+  config)
+    case "${2:-}" in
+      edit) config_edit ;;
+      set)  config_set "${3:-}" ;;
+      get)  config_get "${3:-}" ;;
+      list) config_list ;;
+      reset) config_reset ;;
+      *) echo "Use: helpr config {edit|set|get|list|reset}" ;;
+    esac ;;
+  *) show_page "$1" ;;
 esac

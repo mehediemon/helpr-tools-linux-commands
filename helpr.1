@@ -1,0 +1,46 @@
+.TH HELPR 1 "September 2025" "helpr 1.5.0" "User Commands"
+
+.SH NAME
+helpr \- cheat-style command reference tool
+
+.SH SYNOPSIS
+.B helpr
+[\fIOPTION\fR] \fIPAGE\fR
+
+.SH DESCRIPTION
+helpr displays short usage examples for commands.
+Pages are stored system-wide and per-user.
+
+.SH OPTIONS
+.TP
+.B -l, --list
+List pages.
+
+.TP
+.B -s TERM
+Search pages.
+
+.TP
+.B -e PAGE
+Edit or extend a page.
+
+.SH CONFIG
+Config order:
+defaults → /etc/helpr/config → ~/.config/helpr/config → env vars
+
+.SH COMMANDS
+helpr config edit | set | get | list | reset
+helpr doctor
+helpr uninstall [--backup|--purge]
+
+.SH FILES
+/usr/share/helpr/pages
+~/.config/helpr/pages
+/etc/helpr/config
+~/.config/helpr/config
+
+.SH AUTHOR
+You
+
+.SH LICENSE
+MIT
